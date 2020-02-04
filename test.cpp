@@ -2,6 +2,7 @@
 #include <boost/lexical_cast.hpp>
 #include <vector>
 #include <map>
+#include <iomanip>
 
 std::vector<std::string> split(std::string line);
 
@@ -9,8 +10,10 @@ class visitor {
 public:
     visitor() = default;
     visitor(std::map<std::string, int> index_map) : index_map_(index_map){}
-    void apply(std::string field, int& i) {
-        i = boost::lexical_cast<int>( elems_[index_map_[field]] );
+    template<typename Property> void apply(std::string field, Property& prop) {
+        auto index = index_map_.find(field);
+        if(index == index_map_.end()) { return; }
+        prop = boost::lexical_cast<Property>( elems_[index->second] );
     }
     void set_elems(std::vector<std::string> elems) { elems_ = elems; }
 private:
@@ -20,12 +23,13 @@ private:
 
 template< typename T > class stream {
 public:
-    stream(std::string fields) : fields(fields) {
-        fields_array = split(fields);
+    stream(std::string fields) {
+        auto fields_array = split(fields);
+        std::map<std::string, int> index_map;
         for(int i=0; i<fields_array.size(); ++i) {
-            fields_map[fields_array[i]] = i;
+            index_map[fields_array[i]] = i;
         }
-        visitor_ = visitor(fields_map);
+        visitor_ = visitor(index_map);
     }
     T read() {
         std::string line;
@@ -37,18 +41,7 @@ public:
         return p;
     };
 private:
-    std::string fields;
-    std::vector<std::string> fields_array;
-    std::map<std::string, int> fields_map;
     visitor visitor_;
-
-    static void lexical_cast_( int& v, const std::string& s ) {
-        v = boost::lexical_cast< int >( s );
-    }
-    static void lexical_cast_( std::string& v, const std::string& s ) {
-        v = s;
-    }
-    // todo: add more for other types
 };
 
 template<typename T> struct traits {
@@ -60,16 +53,15 @@ template < typename T, typename V > inline void visit( T& t, V& v ) {
 }
 
 struct P {
-    int x;
+    double x;
     int y;
-    P(): x(0), y(0) {}
+    P(): x(-2.1), y(10) {}
 };
 
 struct Q {
     std::string a;
     bool b;
-    P p;
-    Q(): b(true), p() {}
+    Q(): a("hello"), b(true) {}
 };
 
 template<> struct traits<P> {
@@ -83,26 +75,22 @@ template<> struct traits<Q> {
     template<typename V> static void visit(Q& q, V& v) {
         v.apply("a", q.a);
         v.apply("b", q.b);
-//        v.apply("p", q.p);
     }
 };
 
 
-//std::string fields = "cat,x,,dog,y,,"; // fields for P
-//std::string fields = "a,p/x,b,p/y"; // fields for Q
-
 int main(int argc, char* argv[]) {
     std::string fields = argv[1];
-    stream<P> s(fields);
-    while(std::cin) {
-        P p = s.read();
-        std::cerr << p.x << " " << p.y << std::endl;
-    }
-    // stream<Q> s(fields);
+    // stream<P> s(fields);
     // while(std::cin) {
-    //     Q q = s.read();
-    //     std::cerr << q.a << " " << q.b  << " " << q.p.x << " " << q.p.y << std::endl;
+    //     P p = s.read();
+    //     std::cerr << std::setprecision(16) << p.x << " " << p.y << std::endl;
     // }
+    stream<Q> s(fields);
+    while(std::cin) {
+        Q q = s.read();
+        std::cerr << q.a << " " << q.b << std::endl;
+    }
 }
 
 std::vector<std::string> split(std::string line) {
