@@ -35,9 +35,13 @@ struct Payload {
     Payload(std::string fields) : index_map(index_map_from(fields)) {}
     std::vector<std::string> values;
     const IndexMap index_map;
+    bool append(const std::string& key, std::string& path) const {
+        path += (path.empty() ? "" : "/") + key;
+        return index_map.find(path) != index_map.end();
+    }
 };
 
-template<typename T> void apply(std::string key, T& t, const Payload& payload, std::string path) {
+template<typename T> void apply(const std::string& key, T& t, const Payload& payload, std::string path) {
     path += (path.empty() ? "" : "/") + key;
     auto it = payload.index_map.find(path);
     if(it == payload.index_map.end()) { return; }
@@ -79,23 +83,20 @@ struct A {
 };
 
 namespace visiting {
-template<> void apply(std::string key, C& c, const Payload& payload, std::string path) {
-    path += (path.empty() ? "" : "/") + key;
-    if(payload.index_map.find(path) == payload.index_map.end()) { return; }
+template<> void apply(const std::string& key, C& c, const Payload& payload, std::string path) {
+    if(!payload.append(key, path)) { return; }
     apply("f", c.f, payload, path);
 }
 
-template<> void apply(std::string key, B& b, const Payload& payload, std::string path) {
-    path += (path.empty() ? "" : "/") + key;
-    if(payload.index_map.find(path) == payload.index_map.end()) { return; }
+template<> void apply(const std::string& key, B& b, const Payload& payload, std::string path) {
+    if(!payload.append(key, path)) { return; }
     apply("x", b.x, payload, path);
     apply("i", b.i, payload, path);
     apply("c", b.c, payload, path);
 }
 
-template<> void apply(std::string key, A& a, const Payload& payload, std::string path) {
-    path += (path.empty() ? "" : "/") + key;
-    if(payload.index_map.find(path) == payload.index_map.end()) { return; }
+template<> void apply(const std::string& key, A& a, const Payload& payload, std::string path) {
+    if(!payload.append(key, path)) { return; }
     apply("b", a.b, payload, path);
     apply("m", a.m, payload, path);
 }
