@@ -4,63 +4,90 @@
 #include <iostream>
 #include <vector>
 #include <map>
+#include <set>
 #include <iomanip>
 #include <type_traits>
 
-std::vector<std::string> split(std::string line);
-template<typename T> struct Traits;
+std::vector<std::string> split(std::string line, char delimiter);
+std::string join(std::vector<std::string> elems, char delimiter);
+
+template<typename T> struct Traits {
+    template<typename Visitor> static void visit(T& t, const Visitor& visitor);
+};
 
 class Visitor {
 public:
+    typedef std::pair<std::string, std::string> Path;
+
     Visitor() = default;
-    Visitor(std::map<std::string, unsigned int> index_map) : index_map_(index_map) {}
-    template<typename Property> void apply(std::string field, Property& property) const {
-        if constexpr(std::is_arithmetic<Property>::value || std::is_same<Property,std::string>::value) {
-            auto index = index_map_.find(field);
-            if(index == index_map_.end()) { return; }
-            property = boost::lexical_cast<Property>(elems_[index->second]);
-        } else {
-            std::string prefix = field + "/";
-            std::map<std::string, unsigned int> index_map;
-            for(auto kv: index_map_) {
-                if(!boost::starts_with(kv.first, prefix)) { continue; }
-                auto field = kv.first;
-                auto index = kv.second;
-                boost::algorithm::erase_first(field, prefix);
-                index_map[field] = index;
+    Visitor(size_t index) : index_(index) {}
+    Visitor(std::string fields) {
+        std::set<std::string> roots;
+        std::vector<Path> paths;
+        auto split_fields = split(fields, ',');
+        for(size_t i=0; i<split_fields.size(); ++i) {
+            if(split_fields[i].empty()) { continue; }
+            auto pos = split_fields[i].find_first_of('/');
+            if(pos == std::string::npos) {
+                paths.push_back(std::make_pair(split_fields[i], ""));
+                visitor_map_[split_fields[i]] = Visitor(i);
+                continue;
             }
-            if(index_map.empty()) { return; }
-            auto visitor = Visitor(index_map);
-            visitor.set_elems(elems_);
-            Traits<Property>::visit(property, visitor);
+            auto root = split_fields[i].substr(0, pos);
+            auto rest = split_fields[i].substr(pos+1);
+            roots.insert(root);
+            paths.push_back(std::make_pair(root, rest));
+        }
+
+        for(std::string root: roots) {
+            std::vector<std::string> subfields;
+            for(auto path: paths) {
+                auto subpath = path.first != root ? "" : path.second;
+                subfields.push_back(subpath);
+            }
+            visitor_map_[root] = Visitor(join(subfields, ','));
         }
     }
-    void set_elems(std::vector<std::string> elems) { elems_ = elems; }
-private:
-    std::map<std::string, unsigned int> index_map_;
-    std::vector<std::string> elems_;
-};
 
-template<typename T> struct Traits {
-    static void visit(T& t, const Visitor& visitor);
+    template<typename Property> void apply(std::string field, Property& property) const {
+        auto it = visitor_map_.find(field);
+        if(it == visitor_map_.end()) { return; }
+        if constexpr(std::is_arithmetic<Property>::value || std::is_same<Property,std::string>::value) {
+            property = boost::lexical_cast<Property>(elems_[*it->second.index_]);
+        } else {
+            Traits<Property>::visit(property, it->second);
+        }
+    }
+
+    void set_elems(std::string line) {
+        elems_ = split(line, ',');
+        for(auto& kv: visitor_map_) {
+            kv.second.set_elems(line);
+        }
+    }
+
+    void show() const {
+        std::cerr << (index_ ? *index_ : -1) << std::endl;
+        for(auto kv: visitor_map_) {
+            std::cerr << "key: " << kv.first << std::endl;
+            kv.second.show();
+        }
+    }
+
+private:
+    std::map<std::string, Visitor> visitor_map_;
+    std::optional<size_t> index_;
+    std::vector<std::string> elems_;
 };
 
 template< typename T > class Stream {
 public:
-    Stream(std::string fields) {
-        auto fields_array = split(fields);
-        std::map<std::string, unsigned int> index_map;
-        for(int i=0; i<fields_array.size(); ++i) {
-            index_map[fields_array[i]] = i;
-        }
-        visitor_ = Visitor(index_map);
-    }
+    Stream(std::string fields) : visitor_(fields) { visitor_.show(); }
     T read() {
         std::string line;
         getline(std::cin, line);
-        std::vector<std::string> elems = split(line);
         T t;
-        visitor_.set_elems(elems);
+        visitor_.set_elems(line);
         Traits<T>::visit(t, visitor_);
         return t;
     };
@@ -109,12 +136,23 @@ int main(int argc, char* argv[]) {
     }
 }
 
-std::vector<std::string> split(std::string line) {
+std::vector<std::string> split(std::string line, char delimiter) {
     std::vector<std::string> elems;
     std::stringstream ss(line);
     std::string elem;
-    while (std::getline(ss, elem, ',')) {
+    while(std::getline(ss, elem, delimiter)) {
         elems.push_back(elem);
     }
     return elems;
+}
+
+std::string join(std::vector<std::string> elems, char delimiter) {
+    if(elems.empty()) { return ""; }
+    if(elems.size() == 1) { return elems[0]; }
+    std::stringstream ss;
+    ss << elems[0];
+    for(size_t i=1; i<elems.size(); ++i) {
+        ss << delimiter << elems[i];
+    }
+    return ss.str();
 }
