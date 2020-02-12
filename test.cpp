@@ -3,136 +3,107 @@
 #include <boost/algorithm/string/erase.hpp>
 #include <iostream>
 #include <vector>
-#include <map>
-#include <set>
+#include <unordered_map>
 #include <iomanip>
 #include <type_traits>
 
 std::vector<std::string> split(std::string line, char delimiter);
 std::string join(std::vector<std::string> elems, char delimiter);
 
-template<typename T> struct Traits {
-    template<typename Visitor> static void visit(T& t, const Visitor& visitor);
+namespace visiting {
+typedef std::unordered_map<std::string, size_t> IndexMap;
+
+IndexMap index_map_from(std::string fields) {
+    IndexMap map;
+    auto split_fields = split(fields, ',');
+    for(size_t i=0; i<split_fields.size(); ++i) {
+        map[split_fields[i]] = i;
+    }
+    return map;
+}
+
+struct Payload {
+    Payload(std::string fields) : index_map(index_map_from(fields)) {}
+    std::vector<std::string> path;
+    std::vector<std::string> values;
+    const IndexMap index_map;
 };
 
-class Visitor {
-public:
-    typedef std::pair<std::string, std::string> Path;
-
-    Visitor() = default;
-    Visitor(size_t index) : index_(index) {}
-    Visitor(std::string fields) {
-        std::set<std::string> roots;
-        std::vector<Path> paths;
-        auto split_fields = split(fields, ',');
-        for(size_t i=0; i<split_fields.size(); ++i) {
-            if(split_fields[i].empty()) { continue; }
-            auto pos = split_fields[i].find_first_of('/');
-            if(pos == std::string::npos) {
-                paths.push_back(std::make_pair(split_fields[i], ""));
-                visitor_map_[split_fields[i]] = Visitor(i);
-                continue;
-            }
-            auto root = split_fields[i].substr(0, pos);
-            auto rest = split_fields[i].substr(pos+1);
-            roots.insert(root);
-            paths.push_back(std::make_pair(root, rest));
-        }
-
-        for(std::string root: roots) {
-            std::vector<std::string> subfields;
-            for(auto path: paths) {
-                auto subpath = path.first != root ? "" : path.second;
-                subfields.push_back(subpath);
-            }
-            visitor_map_[root] = Visitor(join(subfields, ','));
-        }
-    }
-
-    template<typename Property> void apply(std::string field, Property& property) const {
-        auto it = visitor_map_.find(field);
-        if(it == visitor_map_.end()) { return; }
-        if constexpr(std::is_arithmetic<Property>::value || std::is_same<Property,std::string>::value) {
-            property = boost::lexical_cast<Property>(elems_[*it->second.index_]);
-        } else {
-            Traits<Property>::visit(property, it->second);
-        }
-    }
-
-    void set_elems(std::string line) {
-        elems_ = split(line, ',');
-        for(auto& kv: visitor_map_) {
-            kv.second.set_elems(line);
-        }
-    }
-
-    void show() const {
-        std::cerr << (index_ ? *index_ : -1) << std::endl;
-        for(auto kv: visitor_map_) {
-            std::cerr << "key: " << kv.first << std::endl;
-            kv.second.show();
-        }
-    }
-
-private:
-    std::map<std::string, Visitor> visitor_map_;
-    std::optional<size_t> index_;
-    std::vector<std::string> elems_;
-};
+template<typename T> void apply(std::string key, T& t, Payload payload) {
+    if(!key.empty()) { payload.path.push_back(key); }
+    auto path = join(payload.path, '/');
+    auto it = payload.index_map.find(path);
+    if(it == payload.index_map.end()) { return; }
+    auto value = payload.values[it->second];
+    t = boost::lexical_cast<T>(value);
+}
+}
 
 template< typename T > class Stream {
 public:
-    Stream(std::string fields) : visitor_(fields) { visitor_.show(); }
-    T read() {
-        std::string line;
-        getline(std::cin, line);
+    Stream(std::string fields) : payload(fields) {}
+    T read(std::string line) {
         T t;
-        visitor_.set_elems(line);
-        Traits<T>::visit(t, visitor_);
+        payload.values = split(line, ',');
+        visiting::apply("", t, payload);
         return t;
     };
 private:
-    Visitor visitor_;
+    visiting::Payload payload;
 };
 
 
-struct P {
+struct C {
+    bool f;
+    C(): f(true) {}
+};
+
+struct B {
     double x;
-    int y;
-    P(): x(-2.1), y(10) {}
+    int i;
+    C c;
+    B(): x(-2.1), i(10) {}
 };
 
-struct Q {
-    std::string a;
-    bool b;
-    P p;
-    Q(): a("hello"), b(true) {}
+struct A {
+    B b;
+    std::string m;
+    A(): m("hello") {}
 };
 
-template<> struct Traits<P> {
-    static void visit(P& p, const Visitor& visitor) {
-        visitor.apply("x", p.x);
-        visitor.apply("y", p.y);
-    }
-};
+namespace visiting {
+template<> void apply(std::string key, C& c, Payload payload) {
+    if(!key.empty()) { payload.path.push_back(key); }
+    apply("f", c.f, payload);
+}
 
-template<> struct Traits<Q> {
-    static void visit(Q& q, const Visitor& visitor) {
-        visitor.apply("a", q.a);
-        visitor.apply("b", q.b);
-        visitor.apply("p", q.p);
-    }
-};
+template<> void apply(std::string key, B& b, Payload payload) {
+    if(!key.empty()) { payload.path.push_back(key); }
+    apply("x", b.x, payload);
+    apply("i", b.i, payload);
+    apply("c", b.c, payload);
+}
 
-// fields "a,b,p/x,p/y"
+template<> void apply(std::string key, A& a, Payload payload) {
+    if(!key.empty()) { payload.path.push_back(key); }
+    apply("b", a.b, payload);
+    apply("m", a.m, payload);
+}
+}
+
+
+// ./a.out "b/x,b/i,b/c/f,m" < <( echo "-2.1,123,0,cats"; echo "12.23,-10,1,dogs" )
 int main(int argc, char* argv[]) {
     std::string fields = argv[1];
-    Stream<Q> stream(fields);
-    while(std::cin) {
-        Q q = stream.read();
+    Stream<A> stream(fields);
+    std::string line;
+    while(getline(std::cin, line)) {
+        A a = stream.read(line);
         std::cerr << std::setprecision(16)
-            << " q.a=" << q.a << " q.b=" << q.b
-            << " q.p.x=" << q.p.x << " q.p.y=" << q.p.y << std::endl;
+            << " b/x=" << a.b.x
+            << " b/i=" << a.b.i
+            << " b/c/f=" << a.b.c.f
+            << " m=" << a.m << std::endl;
     }
 }
 
