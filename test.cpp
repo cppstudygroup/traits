@@ -5,20 +5,20 @@
 #include <unordered_map>
 #include <iomanip>
 
-std::vector<std::string> split(std::string line, char delimiter);
-std::string join(std::vector<std::string> elems, char delimiter);
+std::vector<std::string> split(const std::string& line, char delimiter);
+std::string join(const std::vector<std::string>& elems, char delimiter);
 
 namespace traits {
 typedef std::unordered_map<std::string, boost::optional<size_t>> IndexMap;
 
-IndexMap index_map_from(std::string fields) {
+IndexMap index_map_from(const std::string& fields) {
     IndexMap map;
     auto split_fields = split(fields, ',');
     for(size_t i=0; i<split_fields.size(); ++i) {
         auto field = split_fields[i];
         if(field.empty()) { continue; }
         std::string path;
-        for(auto key: split(field, '/')) {
+        for(const auto& key: split(field, '/')) {
             path += (path.empty() ? "" : "/") + key;
             map[path];
         }
@@ -28,33 +28,36 @@ IndexMap index_map_from(std::string fields) {
 }
 
 struct Payload {
-    Payload(std::string fields) : index_map(index_map_from(fields)) {}
+    Payload(const std::string& fields) : index_map(index_map_from(fields)) {}
     std::vector<std::string> values;
     const IndexMap index_map;
+    mutable std::string path;
 };
 
-template<typename T> void apply(const std::string& key, T& t, const Payload& payload, std::string path) {
-    auto it = payload.index_map.find(path);
+template<typename T> void apply(T& t, const Payload& payload) {
+    auto it = payload.index_map.find(payload.path);
     if(it == payload.index_map.end()) { return; }
     auto value = payload.values[*it->second];
     t = boost::lexical_cast<T>(value);
 }
 
-template<typename T> void visit(const std::string& key, T& t, const Payload& payload, std::string path) {
-    if(!path.empty()) { path += '/'; }
-    path += key;
-    if(payload.index_map.find(path) == payload.index_map.end()) { return; }
-    apply(key, t, payload, path);
+template<typename T> void visit(const std::string& key, T& t, const Payload& payload) {
+    auto original_path = payload.path;
+    payload.path += (payload.path.empty() ? "" : "/") + key;
+    if(payload.index_map.find(payload.path) != payload.index_map.end()) {
+        apply(t, payload);
+    }
+    payload.path = original_path;
 }
-}
+} // namespace traits {
 
 template< typename T > class Stream {
 public:
-    Stream(std::string fields) : payload(fields) {}
-    T read(std::string line) {
+    Stream(const std::string& fields) : payload(fields) {}
+    T read(const std::string& line) {
         T t;
         payload.values = split(line, ',');
-        traits::apply("", t, payload, "");
+        traits::apply(t, payload);
         return t;
     };
 private:
@@ -81,19 +84,19 @@ struct A {
 };
 
 namespace traits {
-template<> void apply(const std::string& key, C& c, const Payload& payload, std::string path) {
-    visit("f", c.f, payload, path);
+template<> void apply(C& c, const Payload& payload) {
+    visit("f", c.f, payload);
 }
 
-template<> void apply(const std::string& key, B& b, const Payload& payload, std::string path) {
-    visit("x", b.x, payload, path);
-    visit("i", b.i, payload, path);
-    visit("c", b.c, payload, path);
+template<> void apply(B& b, const Payload& payload) {
+    visit("x", b.x, payload);
+    visit("i", b.i, payload);
+    visit("c", b.c, payload);
 }
 
-template<> void apply(const std::string& key, A& a, const Payload& payload, std::string path) {
-    visit("b", a.b, payload, path);
-    visit("m", a.m, payload, path);
+template<> void apply(A& a, const Payload& payload) {
+    visit("b", a.b, payload);
+    visit("m", a.m, payload);
 }
 }
 
@@ -113,7 +116,7 @@ int main(int argc, char* argv[]) {
     }
 }
 
-std::vector<std::string> split(std::string line, char delimiter) {
+std::vector<std::string> split(const std::string& line, char delimiter) {
     std::vector<std::string> elems;
     std::stringstream ss(line);
     std::string elem;
@@ -123,7 +126,7 @@ std::vector<std::string> split(std::string line, char delimiter) {
     return elems;
 }
 
-std::string join(std::vector<std::string> elems, char delimiter) {
+std::string join(const std::vector<std::string>& elems, char delimiter) {
     if(elems.empty()) { return ""; }
     if(elems.size() == 1) { return elems[0]; }
     std::stringstream ss;
