@@ -1,29 +1,25 @@
 #include <boost/lexical_cast.hpp>
-#include <boost/algorithm/string/predicate.hpp>
-#include <boost/algorithm/string/erase.hpp>
+#include <boost/optional.hpp>
 #include <iostream>
 #include <vector>
 #include <unordered_map>
-#include <map>
-#include <optional>
 #include <iomanip>
-#include <type_traits>
 
 std::vector<std::string> split(std::string line, char delimiter);
 std::string join(std::vector<std::string> elems, char delimiter);
 
-namespace visiting {
-typedef std::unordered_map<std::string, std::optional<size_t>> IndexMap;
+namespace traits {
+typedef std::unordered_map<std::string, boost::optional<size_t>> IndexMap;
 
 IndexMap index_map_from(std::string fields) {
     IndexMap map;
-    map[""];
     auto split_fields = split(fields, ',');
     for(size_t i=0; i<split_fields.size(); ++i) {
-        if(split_fields[i].empty()) { continue; }
+        auto field = split_fields[i];
+        if(field.empty()) { continue; }
         std::string path;
-        for(auto part: split(split_fields[i], '/')) {
-            path += (path.empty() ? "" : "/") + part;
+        for(auto key: split(field, '/')) {
+            path += (path.empty() ? "" : "/") + key;
             map[path];
         }
         map[path] = i;
@@ -35,18 +31,20 @@ struct Payload {
     Payload(std::string fields) : index_map(index_map_from(fields)) {}
     std::vector<std::string> values;
     const IndexMap index_map;
-    bool append(const std::string& key, std::string& path) const {
-        path += (path.empty() ? "" : "/") + key;
-        return index_map.find(path) != index_map.end();
-    }
 };
 
 template<typename T> void apply(const std::string& key, T& t, const Payload& payload, std::string path) {
-    path += (path.empty() ? "" : "/") + key;
     auto it = payload.index_map.find(path);
     if(it == payload.index_map.end()) { return; }
     auto value = payload.values[*it->second];
     t = boost::lexical_cast<T>(value);
+}
+
+template<typename T> void visit(const std::string& key, T& t, const Payload& payload, std::string path) {
+    if(!path.empty()) { path += '/'; }
+    path += key;
+    if(payload.index_map.find(path) == payload.index_map.end()) { return; }
+    apply(key, t, payload, path);
 }
 }
 
@@ -56,11 +54,11 @@ public:
     T read(std::string line) {
         T t;
         payload.values = split(line, ',');
-        visiting::apply("", t, payload, "");
+        traits::apply("", t, payload, "");
         return t;
     };
 private:
-    visiting::Payload payload;
+    traits::Payload payload;
 };
 
 
@@ -82,23 +80,20 @@ struct A {
     A(): m("hello") {}
 };
 
-namespace visiting {
+namespace traits {
 template<> void apply(const std::string& key, C& c, const Payload& payload, std::string path) {
-    if(!payload.append(key, path)) { return; }
-    apply("f", c.f, payload, path);
+    visit("f", c.f, payload, path);
 }
 
 template<> void apply(const std::string& key, B& b, const Payload& payload, std::string path) {
-    if(!payload.append(key, path)) { return; }
-    apply("x", b.x, payload, path);
-    apply("i", b.i, payload, path);
-    apply("c", b.c, payload, path);
+    visit("x", b.x, payload, path);
+    visit("i", b.i, payload, path);
+    visit("c", b.c, payload, path);
 }
 
 template<> void apply(const std::string& key, A& a, const Payload& payload, std::string path) {
-    if(!payload.append(key, path)) { return; }
-    apply("b", a.b, payload, path);
-    apply("m", a.m, payload, path);
+    visit("b", a.b, payload, path);
+    visit("m", a.m, payload, path);
 }
 }
 
