@@ -1,19 +1,21 @@
 #include <boost/lexical_cast.hpp>
 #include <boost/optional.hpp>
-#include <iostream>
+#include <cstddef>
+#include <string>
 #include <vector>
 #include <unordered_map>
+#include <iostream>
 #include <iomanip>
 
 std::vector<std::string> split(const std::string& line, char delimiter);
 std::string join(const std::vector<std::string>& elems, char delimiter);
 
 namespace traits {
-typedef std::unordered_map<std::string, boost::optional<size_t>> IndexMap;
+typedef std::unordered_map<std::string, boost::optional<std::size_t>> IndexMap;
 
 IndexMap index_map_from(const std::vector<std::string>& fields) {
     IndexMap map;
-    for(size_t i=0; i<fields.size(); ++i) {
+    for(std::size_t i=0; i<fields.size(); ++i) {
         if(fields[i].empty()) { continue; }
         std::string path;
         for(const auto& key: split(fields[i], '/')) {
@@ -26,9 +28,9 @@ IndexMap index_map_from(const std::vector<std::string>& fields) {
 }
 
 struct Payload {
-    Payload(const std::vector<std::string>& fields) : index_map(index_map_from(fields)) {}
     std::vector<std::string> values;
     const IndexMap index_map;
+    explicit Payload(const std::vector<std::string>& fields) : index_map(index_map_from(fields)) {}
 };
 
 template<typename T> void apply(T& t, const Payload& payload, std::string path) {
@@ -54,7 +56,7 @@ public:
     boost::optional<T> read() {
         T t;
         std::string line;
-        getline(istream, line, '\n');
+        std::getline(istream, line, '\n');
         if(line.empty()) { return boost::none; }
         payload.values = split(line, ',');
         traits::apply(t, payload, "");
@@ -106,7 +108,6 @@ template<> void apply(A& a, const Payload& payload, std::string path) {
 int main(int argc, char* argv[]) {
     std::string fields = argv[1];
     Stream<A> stream(std::cin, fields);
-    std::string line;
     while(std::cin) {
         boost::optional<A> a = stream.read();
         if(!a) { break; }
@@ -133,7 +134,7 @@ std::string join(const std::vector<std::string>& elems, char delimiter) {
     if(elems.size() == 1) { return elems[0]; }
     std::stringstream ss;
     ss << elems[0];
-    for(size_t i=1; i<elems.size(); ++i) {
+    for(std::size_t i=1; i<elems.size(); ++i) {
         ss << delimiter << elems[i];
     }
     return ss.str();
